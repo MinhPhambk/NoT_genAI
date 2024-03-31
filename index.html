@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en" ng-app="demo">
+
+<head>
+    <meta charset="utf-8">
+    <title>Uploader</title>
+
+    <script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.4.1/angular.js"></script>
+    <link rel="stylesheet" href="https://netdna.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.css">
+</head>
+
+<body class="container">
+    <script>
+        var app = angular.module('demo', ['ui.uploader']);
+        app.controller('uploaderCtrl', function ($scope, $log, uiUploader) {
+            $scope.btn_remove = function (file) {
+                $log.info('deleting=' + file);
+                uiUploader.removeFile(file);
+            };
+
+            $scope.btn_clean = function () {
+                uiUploader.removeAll();
+            };
+
+            $scope.btn_upload = function () {
+                $log.info('uploading...');
+                uiUploader.startUpload({
+                    url: '',
+                    concurrency: 2,
+                    onProgress: function (file) {
+                        $log.info(file.name + '=' + file.humanSize);
+                        $scope.$apply();
+                    },
+                    onCompleted: function (file, response) {
+                        $log.info(file + 'response' + response);
+                    }
+                });
+            };
+
+            $scope.files = [];
+            var element = document.getElementById('file1');
+            element.addEventListener('change', function (e) {
+                var files = e.target.files;
+                uiUploader.addFiles(files);
+                $scope.files = uiUploader.getFiles();
+                $scope.$apply();
+            });
+        });
+    </script>
+    <div id="uploader" ng-controller="uploaderCtrl">
+        <div class="page-header">
+            <h1>Uploader</h1>
+        </div>
+        <div class="row">
+            <div class="col-md-6">
+                <h3>What?</h3>
+                <p>Upload multiple files at the same time.</p>
+
+                <div class="well">
+                    <div>
+                        <div style="float:right;">
+                            <button ng-click="btn_upload()">Upload</button>
+                            <button ng-click="btn_clean()">Remove all</button>
+                        </div>
+                        <input type="file" id="file1" multiple />
+                    </div>
+                    <div ng-repeat="file in files"
+                        style="margin-top: 20px;border-bottom-color: antiquewhite;border-bottom-style: double;">
+                        <div><span>{{file.name}}</span>
+                            <div style="float:right;"><span>{{file.humanSize}}</span><a ng-click="btn_remove(file)"
+                                    title="Remove from list to be uploaded"><i class="icon-remove"></i></a></div>
+                        </div>
+                        <progress style="width:400px;" value="{{file.loaded ? file.loaded : 0}}"
+                            max="{{file.size}}"></progress>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            'use strict';
+
+            angular.module('ui.uploader', []).service('uiUploader', uiUploader);
+
+            uiUploader.$inject = ['$log'];
+
+            function uiUploader($log) {
+
+                /*jshint validthis: true */
+                var self = this;
+                self.files = [];
+                self.options = {};
+                self.activeUploads = 0;
+                self.uploadedFiles = 0;
+                $log.info('uiUploader loaded');
+
+                function addFiles(files) {
+                    for (var i = 0; i < files.length; i++) {
+                        self.files.push(files[i]);
+                    }
+                }
+
+                function getFiles() {
+                    return self.files;
+                }
+
+                function startUpload(options) {
+                    self.options = options;
+
+                    //headers are not shared by requests
+                    var headers = options.headers || {};
+                    var xhrOptions = options.options || {};
+
+                    for (var i = 0; i < self.files.length; i++) {
+                        if (self.activeUploads == self.options.concurrency) {
+                            break;
+                        }
+                        if (self.files[i].active)
+                            continue;
+                        ajaxUpload(self.files[i], self.options.url, self.options.data, self.options.paramName, headers, xhrOptions);
+                    }
+                }
+
+                function removeFile(file) {
+                    self.files.splice(self.files.indexOf(file), 1);
+                }
+
+                function removeAll() {
+                    self.files.splice(0, self.files.length);
+                }
+
+                return {
+                    addFiles: addFiles,
+                    getFiles: getFiles,
+                    files: self.files,
+                    startUpload: startUpload,
+                    removeFile: removeFile,
+                    removeAll: removeAll
+                };
+
+                function getHumanSize(bytes) {
+                    var sizes = ['n/a', 'bytes', 'KiB', 'MiB', 'GiB', 'TB', 'PB', 'EiB', 'ZiB', 'YiB'];
+                    var i = (bytes === 0) ? 0 : +Math.floor(Math.log(bytes) / Math.log(1024));
+                    return (bytes / Math.pow(1024, i)).toFixed(i ? 1 : 0) + ' ' + sizes[isNaN(bytes) ? 0 : i + 1];
+                }
+
+                function ajaxUpload(file, url, data, key, headers, xhrOptions) {
+                    var xhr, formData, prop;
+                    data = data || {};
+                    key = key || 'file';
+
+                    self.activeUploads += 1;
+                    file.active = true;
+                    xhr = new window.XMLHttpRequest();
+
+                    // To account for sites that may require CORS
+                    if (xhrOptions.withCredentials === true) {
+                        xhr.withCredentials = true;
+                    }
+
+                    formData = new window.FormData();
+                    xhr.open('POST', url);
+
+                    if (headers) {
+                        for (var headerKey in headers) {
+                            if (headers.hasOwnProperty(headerKey)) {
+                                xhr.setRequestHeader(headerKey, headers[headerKey]);
+                            }
+                        }
+                    }
+
+                    // Triggered when upload starts:
+                    xhr.upload.onloadstart = function () {
+                    };
+
+                    // Triggered many times during upload:
+                    xhr.upload.onprogress = function (event) {
+                        if (!event.lengthComputable) {
+                            return;
+                        }
+                        // Update file size because it might be bigger than reported by
+                        // the fileSize:
+                        //$log.info("progres..");
+                        //console.info(event.loaded);
+                        file.loaded = event.loaded;
+                        file.humanSize = getHumanSize(event.loaded);
+                        if (angular.isFunction(self.options.onProgress)) {
+                            self.options.onProgress(file);
+                        }
+                    };
+
+                    // Triggered when the upload is successful (the server may not have responded yet).
+                    xhr.upload.onload = function () {
+
+                        if (angular.isFunction(self.options.onUploadSuccess)) {
+                            self.options.onUploadSuccess(file);
+                        }
+                    };
+
+                    // Triggered when upload fails:
+                    xhr.upload.onerror = function (e) {
+                        if (angular.isFunction(self.options.onError)) {
+                            self.options.onError(e);
+                        }
+                    };
+
+                    // Triggered when the upload has completed AND the server has responded. Equivalent to
+                    // listening for the readystatechange event when xhr.readyState === XMLHttpRequest.DONE.
+                    xhr.onload = function () {
+
+                        self.activeUploads -= 1;
+                        self.uploadedFiles += 1;
+
+                        startUpload(self.options);
+
+                        if (angular.isFunction(self.options.onCompleted)) {
+                            self.options.onCompleted(file, xhr.responseText, xhr.status);
+                        }
+
+                        if (self.activeUploads === 0) {
+                            self.uploadedFiles = 0;
+                            if (angular.isFunction(self.options.onCompletedAll)) {
+                                self.options.onCompletedAll(self.files);
+                            }
+                        }
+                    };
+
+                    // Append additional data if provided:
+                    if (data) {
+                        for (prop in data) {
+                            if (data.hasOwnProperty(prop)) {
+                                formData.append(prop, data[prop]);
+                            }
+                        }
+                    }
+
+                    // Append file data:
+                    formData.append(key, file, file.name);
+
+                    // Initiate upload:
+                    xhr.send(formData);
+
+                    return xhr;
+                }
+
+            }
+
+        }());
+    </script>
+</body>
+
+</html>
